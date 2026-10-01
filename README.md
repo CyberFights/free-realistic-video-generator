@@ -1,114 +1,207 @@
-# Free Realistic Video Generator
+'use client';
 
-A Railway-ready starter project for a free/open-source realistic AI video generator with:
-- text-to-video
-- image + text-to-video
-- character profile creation
-- identity consistency
-- long video generation
-- lip sync support
+import { FormEvent, useEffect, useState } from 'react';
 
-This repository is a production-style starter scaffold, not a closed-source SaaS mirror. It is designed to help you launch a working app on Railway with a modular architecture that can evolve into a real model pipeline.
+export default function HomePage() {
+  const [prompt, setPrompt] = useState(
+    'A cinematic close-up of a confident female presenter speaking naturally in a studio, realistic lighting, shallow depth of field, premium commercial style'
+  );
+  const [negativePrompt, setNegativePrompt] = useState('blurry, low quality, warped face, duplicate fingers, distorted lips');
+  const [duration, setDuration] = useState(8);
+  const [aspectRatio, setAspectRatio] = useState('16:9');
+  const [status, setStatus] = useState('');
+  const [jobId, setJobId] = useState('');
+  const [outputUrl, setOutputUrl] = useState('');
+  const [referenceImage, setReferenceImage] = useState<File | null>(null);
+  const [voiceover, setVoiceover] = useState<File | null>(null);
+  const [polling, setPolling] = useState(false);
 
-## Stack
-- Frontend: Next.js + Tailwind
-- API: FastAPI
-- Background jobs: Celery + Redis
-- Database: PostgreSQL
-- Storage: object storage / Railway volume
-- Video pipeline: pluggable model adapters (Wan, CogVideoX, LTX-Video, Wav2Lip, SyncTalk)
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-## Repository structure
-- `frontend/` - Next.js app
-- `backend/` - FastAPI API + job worker
-- `scripts/` - helper scripts
-- `docker-compose.yml` - local development
-- `.env.example` - environment variables
+  useEffect(() => {
+    if (!jobId || !polling) return;
 
-## Quick start
+    const timer = setInterval(async () => {
+      try {
+        const res = await fetch(`${apiUrl}/jobs/${jobId}`);
+        const result = await res.json();
 
-### 1) Copy environment variables
-```bash
-cp .env.example .env
-```
+        if (result.status) {
+          setStatus(result.status);
+        }
 
-### 2) Run local services
-```bash
-docker compose up --build
-```
+        if (result.output_url) {
+          setOutputUrl(result.output_url);
+          setPolling(false);
+          clearInterval(timer);
+        }
+      } catch (err) {
+        console.error('Polling failed', err);
+      }
+    }, 2500);
 
-### 3) Start frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
+    return () => clearInterval(timer);
+  }, [jobId, polling, apiUrl]);
 
-### 4) Start backend API (if not using docker compose)
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setStatus('Submitting generation job...');
+    setPolling(false);
 
-### 5) Start worker
-```bash
-cd backend
-source .venv/bin/activate
-celery -A worker worker --loglevel=info
-```
+    const formData = new FormData();
+    formData.append('prompt', prompt);
+    formData.append('negative_prompt', negativePrompt);
+    formData.append('duration', String(duration));
+    formData.append('aspect_ratio', aspectRatio);
 
-## Railway deployment
+    if (referenceImage) {
+      formData.append('reference_image', referenceImage);
+    }
 
-This project is designed to work on Railway with these services:
-- `web` service for frontend
-- `api` service for FastAPI backend
-- `worker` service for Celery jobs
-- Redis service
-- Postgres service
-- optional S3-compatible bucket for generated videos
+    if (voiceover) {
+      formData.append('voiceover', voiceover);
+    }
 
-Environment variables expected on Railway:
-```bash
-REDIS_URL=redis://...
-DATABASE_URL=postgresql://...
-NEXT_PUBLIC_API_URL=https://your-api.up.railway.app
-API_BASE_URL=https://your-api.up.railway.app
-SECRET_KEY=change-me
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
-S3_BUCKET_NAME=...
-S3_ENDPOINT=...
-```
+    const response = await fetch(`${apiUrl}/generate`, {
+      method: 'POST',
+      body: formData,
+    });
 
-## Model pipeline
+    const json = await response.json();
 
-The starter includes a modular `VideoPipeline` abstraction so you can swap in open-source generation models:
-- text-to-video models
-- image-conditioned video generation
-- character identity adapters
-- lip sync models
+    if (!response.ok) {
+      setStatus(json.detail || 'Generation failed');
+      return;
+    }
 
-The default implementation is intentionally a placeholder "demo pipeline" that simulates generation, so the project can be run immediately and later upgraded to real models.
+    setJobId(json.job_id || '');
+    setStatus(json.status || 'queued');
+    setPolling(true);
+  }
 
-## Features included in the scaffold
-- prompt form for text-to-video requests
-- optional image upload for image + text prompts
-- job tracking with polling
-- generated asset metadata
-- architecture ready for long videos and lip sync
+  return (
+    <main className="min-h-screen bg-slate-950 text-white">
+      <div className="mx-auto max-w-6xl px-6 py-10">
+        <header className="mb-10 flex items-center justify-between">
+          <div>
+            <p className="text-sm uppercase tracking-[0.2em] text-violet-300">Railway-ready</p>
+            <h1 className="mt-2 text-4xl font-bold">Realistic Video Generator</h1>
+          </div>
+        </header>
 
-## Production upgrade roadmap
-1. Replace stub pipeline with real open-source model runtime
-2. Add character profile database entries and LoRA/IP-Adapter embeddings
-3. Add FFmpeg scene concatenation for long clips
-4. Add Wav2Lip / SyncTalk integration for audio-driven lip sync
-5. Add storage, authentication, billing, and project management
+        <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
+          <form onSubmit={handleSubmit} className="rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
+            <div className="space-y-5">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-200">Prompt</label>
+                <textarea
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  rows={5}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-slate-100 outline-none ring-0"
+                />
+              </div>
 
-## Licensing
-MIT
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-200">Negative Prompt</label>
+                <textarea
+                  value={negativePrompt}
+                  onChange={(e) => setNegativePrompt(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-slate-100 outline-none ring-0"
+                />
+              </div>
 
-## Notes
-This project is intentionally scoped as a realistic starter and deployment scaffold. It is designed to be extended into a real AI video product.
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-200">Duration (seconds)</label>
+                  <input
+                    type="number"
+                    min={4}
+                    max={60}
+                    value={duration}
+                    onChange={(e) => setDuration(Number(e.target.value))}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-slate-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-200">Aspect ratio</label>
+                  <select
+                    value={aspectRatio}
+                    onChange={(e) => setAspectRatio(e.target.value)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-slate-100"
+                  >
+                    <option value="16:9">16:9</option>
+                    <option value="9:16">9:16</option>
+                    <option value="1:1">1:1</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-200">Reference Image</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setReferenceImage(e.target.files?.[0] || null)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-slate-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-200">Voiceover / Audio</label>
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    onChange={(e) => setVoiceover(e.target.files?.[0] || null)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-slate-100"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full rounded-xl bg-violet-600 px-4 py-3 font-semibold text-white transition hover:bg-violet-500"
+              >
+                Generate Video
+              </button>
+            </div>
+          </form>
+
+          <aside className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
+            <h2 className="mb-4 text-xl font-semibold">Generation status</h2>
+            <div className="rounded-xl border border-slate-700 bg-slate-950 p-4">
+              <p className="text-sm text-slate-400">Status</p>
+              <p className="mt-2 text-lg font-medium text-violet-300">{status || 'Idle'}</p>
+
+              {jobId ? (
+                <div className="mt-6">
+                  <p className="text-sm text-slate-400">Job ID</p>
+                  <p className="mt-2 break-all text-sm text-slate-200">{jobId}</p>
+                </div>
+              ) : null}
+
+              {outputUrl ? (
+                <div className="mt-6">
+                  <a href={outputUrl} target="_blank" rel="noreferrer" className="text-violet-300 underline">
+                    Open output video
+                  </a>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mt-6 space-y-3 text-sm text-slate-300">
+              <p>• text-to-video</p>
+              <p>• image + prompt generation</p>
+              <p>• character consistency</p>
+              <p>• long video pipeline</p>
+              <p>• lip sync ready</p>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </main>
+  );
+}
