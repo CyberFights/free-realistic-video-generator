@@ -1,7 +1,10 @@
+# backend/pipeline.py
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+
+from model_adapter import LipSyncAdapter, VideoGenerationRequest, get_video_adapter
 
 
 @dataclass
@@ -15,42 +18,36 @@ class VideoPipelineConfig:
 class VideoPipeline:
     def __init__(self, config: Optional[VideoPipelineConfig] = None):
         self.config = config or VideoPipelineConfig()
+        self.adapter = get_video_adapter(self.config.model_name)
+        self.lip_sync = LipSyncAdapter()
 
     def generate(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        prompt = payload.get("prompt", "")
-        duration = payload.get("duration", 8)
-        aspect_ratio = payload.get("aspect_ratio", "16:9")
-        has_reference_image = payload.get("has_reference_image", False)
-        has_voiceover = payload.get("has_voiceover", False)
+        request = VideoGenerationRequest(
+            prompt=payload.get("prompt", ""),
+            duration=int(payload.get("duration", 8)),
+            aspect_ratio=payload.get("aspect_ratio", "16:9"),
+            negative_prompt=payload.get("negative_prompt", ""),
+            character_name=payload.get("character_name"),
+            reference_image_path=payload.get("reference_image_path"),
+            voiceover_path=payload.get("voiceover_path"),
+            has_reference_image=bool(payload.get("has_reference_image", False)),
+            has_voiceover=bool(payload.get("has_voiceover", False)),
+        )
 
-        if has_reference_image:
-            prompt = f"{prompt} [image-conditioned motion and identity consistent character]"
+        result = self.adapter.generate(request)
 
-        if has_voiceover:
-            prompt = f"{prompt} [voiceover audio provided, lip sync step enabled]"
+        if self.config.use_lip_sync or request.has_voiceover:
+            result["lip_sync"] = self.lip_sync.sync(payload)
 
-        return {
-            "job_id": payload.get("job_id", "demo-job"),
-            "status": "completed",
-            "prompt": prompt,
-            "duration": duration,
-            "aspect_ratio": aspect_ratio,
-            "output_url": f"https://example.com/generated/{payload.get('job_id', 'demo-job')}.mp4",
-            "meta": {
-                "model": self.config.model_name,
-                "identity_locked": self.config.use_identity_lock,
-                "lip_sync_enabled": self.config.use_lip_sync or has_voiceover,
-                "long_video_mode": self.config.long_video_mode,
-                "reference_image": has_reference_image,
-                "voiceover": has_voiceover,
-            },
-            "steps": [
-                "prompt normalization",
-                "reference conditioning",
-                "video generation",
-                "post-processing",
-            ],
+        result["meta"] = {
+            **result.get("meta", {}),
+            "model": self.config.model_name,
+            "identity_locked": self.config.use_identity_lock,
+            "lip_sync_enabled": self.config.use_lip_sync or request.has_voiceover,
+            "long_video_mode": self.config.long_video_mode,
         }
+
+        return result
 
     def apply_character_consistency(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -60,8 +57,4 @@ class VideoPipeline:
         }
 
     def apply_lip_sync(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return {
-            "status": "lip-synced",
-            "voiceover": payload.get("has_voiceover", False),
-            "method": "Wav2Lip / SyncTalk integration ready",
-        }
+        return self.lip_sync.sync(payload)

@@ -1,19 +1,14 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+# frontend/Dockerfile
+FROM node:20-alpine
 
-:root {
-  color-scheme: dark;
-}
+WORKDIR /app
 
-body {
-  margin: 0;
-  font-family: Arial, Helvetica, sans-serif;
-  background: #020617;
-}
-textarea,
-input,
-select,
-button {
-  font: inherit;
-}
+COPY package.json ./
+RUN npm install
+
+COPY . .
+RUN npm run build
+
+EXPOSE 3000
+
+CMD ["npm", "run", "start", "--", "--hostname", "0.0.0.0", "--port", "3000"]

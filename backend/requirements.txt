@@ -1,107 +1,12 @@
-# Free Realistic Video Generator
+# backend/requirements.txt
 
-This repository is a Railway-ready starter app for a realistic AI video generation platform with:
-- text-to-video
-- image + text-to-video
-- character creation and consistency
-- long-form video generation workflows
-- lip-sync support preparation
-
-Important note:
-This project is an architecture starter and deployment scaffold. A truly free, realistic, production-quality generator with strong identity consistency and lip sync requires GPU-backed open-source model runtimes or external inference APIs. This repo helps you build that pipeline in a modular, Railway-friendly way.
-
-## Architecture
-- Frontend: Next.js
-- Backend: FastAPI
-- Job queue: Celery + Redis
-- Database: PostgreSQL
-- Storage: S3-compatible storage or Railway volumes
-- Model layer: pluggable video generation + lip-sync adapters
-
-## Local development
-
-### 1) Environment variables
-```bash
-cp .env.example .env
-```
-
-### 2) Start dependencies
-```bash
-docker compose up --build
-```
-
-### 3) Start frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-### 4) Start backend
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### 5) Start worker
-```bash
-cd backend
-source .venv/bin/activate
-celery -A worker worker --loglevel=info
-```
-
-## API endpoints
-
-### Health
-```bash
-curl http://localhost:8000/health
-```
-
-### Create generation job
-```bash
-curl -X POST http://localhost:8000/generate \
-  -F "prompt=A cinematic close-up of a presenter speaking naturally in a studio" \
-  -F "negative_prompt=blurry, low quality" \
-  -F "duration=8" \
-  -F "aspect_ratio=16:9"
-```
-
-### View jobs
-```bash
-curl http://localhost:8000/jobs
-```
-
-## Railway deployment
-
-The project is designed to run as multiple Railway services:
-- `web` service: frontend
-- `api` service: backend
-- `worker` service: Celery worker
-- PostgreSQL service
-- Redis service
-- object storage for video files
-
-### Required environment variables
-```bash
-REDIS_URL=redis://...
-DATABASE_URL=postgresql://...
-NEXT_PUBLIC_API_URL=https://your-api-url
-API_BASE_URL=https://your-api-url
-SECRET_KEY=change-me
-```
-
-## Production upgrade path
-1. Replace demo pipeline with real video-generation model runtime
-2. Add character profiles and identity embeddings
-3. Add FFmpeg-based shot stitching for long videos
-4. Integrate lip sync pipeline (Wav2Lip / SyncTalk)
-5. Connect storage and user/project management
-
-## Notes
-This repo acts as a realistic, deployable foundation for an AI video SaaS. It is intentionally modular so you can plug in open-source or paid video-generation services as needed.
-
-## License
-MIT
+fastapi==0.110.0
+uvicorn==0.30.1
+celery==5.4.0
+redis==5.0.1
+sqlalchemy==2.0.31
+python-dotenv==1.0.1
+psycopg2-binary==2.9.9
+python-multipart==0.0.1
+pydantic==2.7.4
+httpx==0.27.0

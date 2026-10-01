@@ -1,8 +1,9 @@
+# backend/provider_config.py
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 
 @dataclass
@@ -44,13 +45,13 @@ def get_provider_config() -> Dict[str, ProviderConfig]:
             endpoint=os.getenv("COGVIDEOX_ENDPOINT"),
             model=os.getenv("COGVIDEOX_MODEL"),
         ),
-
     }
 
 
 def get_active_provider_name() -> str:
     config = get_provider_config()
-    for name in ["wan", "cogvideox", "huggingface", "demo"]:
+    names = ["wan", "cogvideox", "huggingface", "demo"]
+    for name in names:
         if config.get(name) and config[name].enabled:
             return name
     return "demo"

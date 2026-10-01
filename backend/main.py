@@ -1,6 +1,8 @@
+# backend/main.py
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
@@ -14,7 +16,7 @@ from schemas import CharacterProfileResponse, JobStatusResponse
 from storage import storage
 from worker import celery_app
 
-app = FastAPI(title="Video Generator API", version="0.4.0")
+app = FastAPI(title="Video Generator API", version="0.5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,15 +60,14 @@ async def generate_video(
         raise HTTPException(status_code=400, detail="Duration must be between 4 and 60 seconds")
 
     job_id = os.urandom(8).hex()
-
-    reference_info = None
-    voiceover_info = None
+    ref_info = None
+    voice_info = None
 
     if reference_image is not None:
-        reference_info = storage.save_upload(reference_image.file, "reference_images", reference_image.filename or "reference.png")
+        ref_info = storage.save_upload(reference_image.file, "reference_images", reference_image.filename or "reference.png")
 
     if voiceover is not None:
-        voiceover_info = storage.save_upload(voiceover.file, "voiceovers", voiceover.filename or "voiceover.wav")
+        voice_info = storage.save_upload(voiceover.file, "voiceovers", voiceover.filename or "voiceover.wav")
 
     job = GenerationJob(
         job_id=job_id,
@@ -77,9 +78,10 @@ async def generate_video(
         status="queued",
         has_reference_image=reference_image is not None,
         has_voiceover=voiceover is not None,
-        output_url=(reference_info.url if reference_info else (voiceover_info.url if voiceover_info else None)),
+        output_url=(ref_info.url if ref_info else (voice_info.url if voice_info else None)),
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
     )
-
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -93,8 +95,8 @@ async def generate_video(
         "character_name": character_name,
         "has_reference_image": reference_image is not None,
         "has_voiceover": voiceover is not None,
-        "reference_image_path": reference_info.path if reference_info else None,
-        "voiceover_path": voiceover_info.path if voiceover_info else None,
+        "reference_image_path": ref_info.path if ref_info else None,
+        "voiceover_path": voice_info.path if voice_info else None,
     }
 
     celery_app.send_task("tasks.generate_video", kwargs={"payload": payload})
@@ -161,13 +163,7 @@ async def create_character(
     db.commit()
     db.refresh(profile)
 
-    return CharacterProfileResponse(
-        id=profile.id,
-        name=profile.name,
-        prompt=profile.prompt,
-        style=profile.style,
-        avatar_url=profile.avatar_url,
-    )
+    return CharacterProfileResponse(id=profile.id, name=profile.name, prompt=profile.prompt, style=profile.style, avatar_url=profile.avatar_url)
 
 
 @app.get("/demo")
@@ -180,5 +176,5 @@ def demo() -> Dict[str, Any]:
             "character consistency",
             "lip sync ready",
         ],
-        "status": "backend database scaffold",
+        "status": "deployment-ready foundation",
     }
