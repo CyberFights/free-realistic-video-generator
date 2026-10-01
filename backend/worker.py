@@ -1,109 +1,66 @@
 from __future__ import annotations
 
 import os
-import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from celery import Celery
 
-from worker import celery_app
+from database import GenerationJob, SessionLocal
+from pipeline import VideoPipeline, VideoPipelineConfig
 
-app = FastAPI(title="Video Generator API", version="0.2.0")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+celery_app = Celery(
+    "videogen",
+    broker=REDIS_URL,
+    backend=REDIS_URL,
 )
 
-JOB_STORE: Dict[str, Dict[str, Any]] = {}
+celery_app.conf.update(
+    task_serializer="json",
+    accept_content=["json"],
+    result_serializer="json",
+    timezone="UTC",
+    enable_utc=True,
+    task_track_started=True,
+    task_time_limit=1800,
+)
 
 
-@app.get("/health")
-def health() -> Dict[str, Any]:
-    return {
-        "status": "ok",
-        "service": "videogen-api",
-        "redis": os.getenv("REDIS_URL", "redis://localhost:6379/0"),
-    }
+@celery_app.task(name="tasks.generate_video")
+def generate_video(payload: Dict[str, Any]) -> Dict[str, Any]:
+    job_id = payload.get("job_id")
 
+    db = SessionLocal()
+    try:
+        if job_id:
+            job = db.query(GenerationJob).filter(GenerationJob.job_id == job_id).first()
+            if job:
+                job.status = "processing"
+                db.commit()
+    finally:
+        db.close()
 
-@app.post("/generate")
-async def generate_video(
-    prompt: str = Form(...),
-    negative_prompt: str = Form(""),
-    duration: int = Form(8),
-    aspect_ratio: str = Form("16:9"),
-    character_name: Optional[str] = Form(None),
-    reference_image: Optional[UploadFile] = File(default=None),
-    voiceover: Optional[UploadFile] = File(default=None),
-):
-    if not prompt or len(prompt.strip()) < 3:
-        raise HTTPException(status_code=400, detail="Prompt is required")
+    pipeline = VideoPipeline(
+        VideoPipelineConfig(
+            model_name="wan-2.1-demo",
+            use_identity_lock=True,
+            use_lip_sync=bool(payload.get("has_voiceover", False)),
+            long_video_mode=payload.get("duration", 8) > 12,
+        )
+    )
 
-    if duration < 4 or duration > 60:
-        raise HTTPException(status_code=400, detail="Duration must be between 4 and 60 seconds")
+    output = pipeline.generate(payload)
 
-    job_id = str(uuid.uuid4())
-    payload = {
-        "job_id": job_id,
-        "prompt": prompt,
-        "negative_prompt": negative_prompt,
-        "duration": duration,
-        "aspect_ratio": aspect_ratio,
-        "character_name": character_name,
-        "has_reference_image": reference_image is not None,
-        "has_voiceover": voiceover is not None,
-        "created_at": __import__("datetime").datetime.utcnow().isoformat(),
-    }
+    db = SessionLocal()
+    try:
+        if job_id:
+            job = db.query(GenerationJob).filter(GenerationJob.job_id == job_id).first()
+            if job:
+                job.status = output.get("status", "completed")
+                job.output_url = output.get("output_url")
+                db.commit()
+    finally:
+        db.close()
 
-    task = celery_app.send_task("tasks.generate_video", kwargs={"payload": payload})
-
-    JOB_STORE[job_id] = {
-        "job_id": job_id,
-        "status": "queued",
-        "task_id": task.id,
-        "output_url": None,
-    }
-
-    return JSONResponse({
-        "job_id": job_id,
-        "status": "queued",
-        "message": "Video generation started",
-    })
-
-
-@app.get("/jobs")
-def list_jobs() -> Dict[str, Any]:
-    return {
-        "jobs": list(JOB_STORE.values()),
-        "count": len(JOB_STORE),
-    }
-
-
-@app.get("/jobs/{job_id}")
-def get_job(job_id: str) -> Dict[str, Any]:
-    job = JOB_STORE.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    return job
-
-
-@app.get("/demo")
-def demo() -> Dict[str, Any]:
-    return {
-        "project": "Realistic Video Generator",
-        "features": [
-            "text-to-video",
-            "image + prompt generation",
-            "character consistency",
-            "long-form clips",
-            "lip sync ready",
-        ],
-        "status": "starter scaffold",
-    }
+    return output
