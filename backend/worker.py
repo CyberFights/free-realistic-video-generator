@@ -43,10 +43,10 @@ def generate_video(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     pipeline = VideoPipeline(
         VideoPipelineConfig(
-            model_name="wan-2.1-demo",
+            model_name="demo-video-model",
             use_identity_lock=True,
             use_lip_sync=bool(payload.get("has_voiceover", False)),
-            long_video_mode=payload.get("duration", 8) > 12,
+            long_video_mode=False,
         )
     )
 

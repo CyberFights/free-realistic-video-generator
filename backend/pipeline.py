@@ -1,40 +1,67 @@
 from __future__ import annotations
 
-import os
-from typing import Any, Dict
-
-from celery import Celery
-
-from pipeline import VideoPipeline, VideoPipelineConfig
-
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-
-celery_app = Celery(
-    "videogen",
-    broker=REDIS_URL,
-    backend=REDIS_URL,
-)
-
-celery_app.conf.update(
-    task_serializer="json",
-    accept_content=["json"],
-    result_serializer="json",
-    timezone="UTC",
-    enable_utc=True,
-    task_track_started=True,
-    task_time_limit=1800,
-)
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
 
-@celery_app.task(name="tasks.generate_video")
-def generate_video(payload: Dict[str, Any]) -> Dict[str, Any]:
-    pipeline = VideoPipeline(
-        VideoPipelineConfig(
-            model_name="wan-2.1-demo",
-            use_identity_lock=True,
-            use_lip_sync=payload.get("has_voiceover", False),
-        )
-    )
+@dataclass
+class VideoPipelineConfig:
+    model_name: str = "demo-video-model"
+    use_identity_lock: bool = True
+    use_lip_sync: bool = False
+    long_video_mode: bool = False
 
-    output = pipeline.generate(payload)
-    return output
+
+class VideoPipeline:
+    def __init__(self, config: Optional[VideoPipelineConfig] = None):
+        self.config = config or VideoPipelineConfig()
+
+    def generate(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        prompt = payload.get("prompt", "")
+        duration = payload.get("duration", 8)
+        aspect_ratio = payload.get("aspect_ratio", "16:9")
+        has_reference_image = payload.get("has_reference_image", False)
+        has_voiceover = payload.get("has_voiceover", False)
+
+        if has_reference_image:
+            prompt = f"{prompt} [image-conditioned motion and identity consistent character]"
+
+        if has_voiceover:
+            prompt = f"{prompt} [voiceover audio provided, lip sync step enabled]"
+
+        return {
+            "job_id": payload.get("job_id", "demo-job"),
+            "status": "completed",
+            "prompt": prompt,
+            "duration": duration,
+            "aspect_ratio": aspect_ratio,
+            "output_url": f"https://example.com/generated/{payload.get('job_id', 'demo-job')}.mp4",
+            "meta": {
+                "model": self.config.model_name,
+                "identity_locked": self.config.use_identity_lock,
+                "lip_sync_enabled": self.config.use_lip_sync or has_voiceover,
+                "long_video_mode": self.config.long_video_mode,
+                "reference_image": has_reference_image,
+                "voiceover": has_voiceover,
+            },
+            "steps": [
+                "prompt normalization",
+                "reference conditioning",
+                "video generation",
+                "post-processing",
+            ],
+        }
+
+    def apply_character_consistency(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "status": "identity-locked",
+            "character_name": payload.get("character_name", "default-character"),
+            "method": "reference-image conditioning",
+        }
+
+    def apply_lip_sync(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "status": "lip-synced",
+            "voiceover": payload.get("has_voiceover", False),
+            "method": "Wav2Lip / SyncTalk integration ready",
+        }
